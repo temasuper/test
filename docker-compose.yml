@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   frontend:
     build: ./frontend
@@ -5,9 +7,15 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+      - authentik-server
     environment:
       - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_AUTHENTIK_URL=http://localhost:9000
       - PORT=3000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`notes.localhost`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
 
   backend:
     build: ./backend
@@ -16,8 +24,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      authentik-server:
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/notes_db
+      - AUTHENTIK_URL=http://authentik-server:9000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.notes.localhost`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
 
   db:
     image: postgres:15
@@ -35,5 +50,93 @@ services:
       timeout: 5s
       retries: 5
 
+  authentik-server:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2023.8.3}
+    container_name: authentik-server
+    command: server
+    environment:
+      - AUTHENTIK_REDIS__HOST=authentik-redis
+      - AUTHENTIK_POSTGRESQL__HOST=authentik-postgres
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=your_secure_password
+      - AUTHENTIK_SECRET_KEY=your_very_secure_secret_key_here
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+    volumes:
+      - ./authentik/media:/media
+      - ./authentik/custom-templates:/templates
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  authentik-worker:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2023.8.3}
+    command: worker
+    environment:
+      - AUTHENTIK_REDIS__HOST=authentik-redis
+      - AUTHENTIK_POSTGRESQL__HOST=authentik-postgres
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=your_secure_password
+      - AUTHENTIK_SECRET_KEY=your_very_secure_secret_key_here
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+    volumes:
+      - ./authentik/media:/media
+      - ./authentik/custom-templates:/templates
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_started
+
+  authentik-postgres:
+    image: postgres:12-alpine
+    environment:
+      - POSTGRES_PASSWORD=your_secure_password
+      - POSTGRES_USER=authentik
+      - POSTGRES_DB=authentik
+    volumes:
+      - authentik_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  authentik-redis:
+    image: redis:alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - authentik_redis:/data
+
+  traefik:
+    image: traefik:v2.5
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
 volumes:
   postgres_data:
+  authentik_postgres:
+  authentik_redis:
