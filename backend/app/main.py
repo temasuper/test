@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import List
 from . import models, schemas, database, auth_schemas
@@ -18,10 +17,7 @@ app.add_middleware(
 )
 
 # Создание таблиц при запуске
-models.Base.metadata.create_all(bind=database.engine)
-
-# Добавляем user_id в модель Note
-models.Note.user_id = Column(String, nullable=True)
+database.Base.metadata.create_all(bind=database.engine)
 
 @app.get("/api/notes", response_model=List[schemas.Note])
 def get_notes(db: Session = Depends(database.get_db), current_user: auth_schemas.UserInfo = Depends(get_current_user)):

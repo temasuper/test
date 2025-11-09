@@ -1,0 +1,2 @@
+This folder is intentionally present to help the repo tools and ensure paths resolve when running alembic.
+Alembic scripts will live in `backend/alembic` (folder created alongside this placeholder).
